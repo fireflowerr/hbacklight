@@ -7,6 +7,8 @@ name:                hbacklight
 version:             0.1.0.0
 author:              fireflower
 maintainer:          fireflower.hs@gmail.com
+license:             MIT
+license-file:        LICENSE
 build-type:          Simple
 
 executable hbacklight
