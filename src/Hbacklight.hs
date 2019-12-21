@@ -114,8 +114,8 @@ dim i = case mode i of
     (Minus x)   -> setV $ lvl - x
     (Percent x) -> let
         p    = (fromIntegral x / 100)
-        lvl' = fromIntegral lvl
-        in setV $ lvl' * p + lvl'
+        m    = fromIntegral . max $ i
+        in setV . round $ p * m
     (Set x) -> setV x
     where
         path = devicePath <> lookupJust "brightness" deviceSub
