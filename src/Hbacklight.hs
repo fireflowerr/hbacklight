@@ -1,14 +1,13 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Hbacklight where
 import Prelude hiding (max, readFile)
-import Control.Monad (when, unless, foldM)
-import Control.Applicative (optional, (<**>))
-import Options.Applicative (Parser(..), execParser, info, helper, fullDesc, progDesc, header, metavar, long, short, strOption, help, switch)
+import Control.Monad (when, foldM)
+import Control.Applicative (optional)
+import Options.Applicative (Parser, execParser, info, helper, fullDesc, progDesc, header, metavar, long, short, strOption, help, switch)
 import Data.Semigroup ((<>))
-import System.Exit (exitFailure, exitSuccess)
 import System.Directory (doesFileExist, doesDirectoryExist)
 import Text.Read (readMaybe)
-import Text.PrettyPrint.Boxes (Box(..), text, hsep, vcat, left, right, printBox, (<+>))
+import Text.PrettyPrint.Boxes (Box(..), text, vcat, left, right, printBox, (<+>))
 import System.IO.Strict (readFile)
 import System.Posix.IO (openFd, fdWrite, OpenMode(..), defaultFileFlags)
 
@@ -117,10 +116,11 @@ dim i = case mode i of
         m    = fromIntegral . max $ i
         in setV . round $ p * m
     (Set x) -> setV x
+    NoOp    -> return ()
     where
-        path = devicePath <> lookupJust "brightness" deviceSub
+        path = devicePath <> name i <> "/" <> lookupJust "brightness" deviceSub
         fd   = openFd
-            "/sys/class/backlight/intel_backlight/brightness"
+            path
             WriteOnly
             Nothing
             defaultFileFlags
@@ -160,5 +160,5 @@ main :: IO ()
 main = run =<< execParser cmd where
     cmd = info (helper <*> opts )
         ( fullDesc
-        <> progDesc "Aadjust backlight device"
+        <> progDesc "Adjust backlight device"
         <> header "hbacklight - backlight manager" )

@@ -17,7 +17,7 @@ ACTION=="add", SUBSYSTEM=="backlight", KERNEL=="intel_backlight", RUN+="/bin/chm
 ## Usage
 ```
 Usage: hbacklight (-i|--id TARGET) [-v|--verbose] [-d|--delta [+,-,%,~]AMOUNT]
-  Aadjust backlight device
+  Adjust backlight device
 
 Available options:
   -h,--help                Show this help text
