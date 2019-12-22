@@ -13,6 +13,7 @@ tested-with:         GHC == 8.6.5
 
 executable hbacklight
   main-is:             Hbacklight.hs
+  ghc-options:         -main-is Hbacklight
   build-depends:       base                 >= 4.12   && <4.14,
                        boxes                >= 0.1.5  && < 0.2,
                        directory            >= 1.3.3  && < 1.4,
