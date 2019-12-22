@@ -1,4 +1,3 @@
-{-# LANGUAGE ScopedTypeVariables #-}
 module Hbacklight where
 import Prelude hiding (max, readFile)
 import Control.Monad (when, foldM)
@@ -11,8 +10,10 @@ import Text.PrettyPrint.Boxes (Box(..), text, vcat, left, right, printBox, (<+>)
 import System.IO.Strict (readFile)
 import System.Posix.IO (openFd, fdWrite, OpenMode(..), defaultFileFlags)
 
+
 devicePath :: String
 devicePath = "/sys/class/backlight/"
+
 
 deviceSub :: [(String, Device)]
 deviceSub =
@@ -26,7 +27,7 @@ deviceSub =
 lookupJust :: (Eq a) => a -> [(a, b)] -> b
 lookupJust x xs = case x `lookup` xs of
     Nothing  -> error "key not present"
-    (Just r) -> r
+    Just r   -> r
 
 
 data Interface = Backlight
@@ -39,6 +40,7 @@ data Interface = Backlight
     , mode       :: Mode }
     deriving (Show)
 
+
 type Device = String
 
 
@@ -47,7 +49,9 @@ data Opts = Opts
     , verbose :: Bool
     , delta   :: Maybe String }
 
+
 data Mode = Plus Integer | Minus Integer | Percent Integer | Set Integer | NoOp deriving (Show)
+
 
 toMode :: String -> Mode
 toMode ('+':xs) = Plus    $ read xs
@@ -74,10 +78,6 @@ opts = Opts
         <> short 'd'
         <> metavar "[+,-,%,~]AMOUNT"
         <> help "Modify the backlight value, ~ sets the value to AMOUNT, else shift is relative. Defaults to ~" )
-
-
-readArg :: forall a b. (Read a) => String -> (a -> b) -> Maybe a
-readArg s f = readMaybe s
 
 
 parseDevicePath :: String -> String -> String -> String -> String -> String -> Mode -> Maybe Interface
@@ -109,14 +109,14 @@ parseDevice d m = do
 dim :: Interface -> IO ()
 dim (Backlight _ _ _ _ _ _ NoOp) = return ()
 dim i = case mode i of
-    (Plus x)    -> setV $ lvl + x
-    (Minus x)   -> setV $ lvl - x
-    (Percent x) -> let
+    Plus x    -> setV $ lvl + x
+    Minus x   -> setV $ lvl - x
+    Percent x -> let
         p    = (fromIntegral x / 100)
         m    = fromIntegral . max $ i
         in setV . round $ p * m
-    (Set x) -> setV x
-    NoOp    -> return ()
+    Set x     -> setV x
+    NoOp      -> return ()
     where
         path = devicePath <> name i <> "/" <> lookupJust "brightness" deviceSub
         fd   = openFd
@@ -151,7 +151,7 @@ run o = do
     interface <- parseDevice (id' o) m
     case interface of
         Nothing  -> putStrLn "err: cannot stat backlight device"
-        (Just i) -> do
+        Just i   -> do
             when (verbose o) $ printBox . table $ i
             dim i
 
