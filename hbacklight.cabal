@@ -21,7 +21,7 @@ executable hbacklight
                        optparse-applicative >= 0.15.1 && < 0.16,
                        strict               >= 0.3.2  && < 0.4,
                        transformers         >= 0.5.6  && < 0.6,
-                       split
+                       split                >= 0.2.3  && < 0.3
   hs-source-dirs:      src
   default-language:    Haskell2010
   ghc-options:         -Wall

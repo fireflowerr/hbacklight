@@ -213,7 +213,7 @@ dim i = case mode i of
 
 
 idL :: Int
-idL = 16
+idL = 24
 
 
 table :: Interface -> Box
