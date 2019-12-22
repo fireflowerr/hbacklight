@@ -13,16 +13,22 @@ In order to use hbacklight without sudo, you may need to create a udev rule and 
 » cat /etc/udev/rules.d/10-backlight.rules
 ACTION=="add", SUBSYSTEM=="backlight", KERNEL=="intel_backlight", RUN+="/bin/chgrp video /sys/class/backlight/%k/brightness"
 ACTION=="add", SUBSYSTEM=="backlight", KERNEL=="intel_backlight", RUN+="/bin/chmod g+w /sys/class/backlight/%k/brightness"
+» cat /etc/udev/rules.d/10-kbd_backlight.rules
+ACTION=="add", SUBSYSTEM=="leds", KERNEL=="dell::kbd_backlight", RUN+="/bin/chgrp video /sys/class/leds/%k/brightness"
+ACTION=="add", SUBSYSTEM=="leds", KERNEL=="dell::kbd_backlight", RUN+="/bin/chmod g+w /sys/class/leds/%k/brightness"
 ```
 ## Usage
 ```
-Usage: hbacklight (-i|--id TARGET) [-v|--verbose] [-d|--delta [+,-,%,~]AMOUNT]
-  Adjust backlight device
+Usage: hbacklight [[-e|--enum] | [-l|--led] (-i|--id TARGET) [-v|--verbose]
+                    [-d|--delta [+,-,%,~]AMOUNT]]
+  Adjust backlight backlight
 
 Available options:
   -h,--help                Show this help text
-  -i,--id TARGET           Identifier of backlight device
-  -v,--verbose             informative of backlight device state
+  -e,--enum                List available devices
+  -l,--led                 Target led device
+  -i,--id TARGET           Identifier of backlight backlight
+  -v,--verbose             Informative summary backlight backlight state
   -d,--delta [+,-,%,~]AMOUNT
                            Modify the backlight value, ~ sets the value to
                            AMOUNT, else shift is relative. Defaults to ~
@@ -37,5 +43,11 @@ brightness                    200
 actual_brightness             200
 max_brightness               7500
 type                          raw
+
+» hbacklight -vli dell::kbd_backlight
+led            dell::kbd_backlight
+brightness                       2
+max_brightness                   2
+
 » hbacklight -i intel_backlight -d 1000
 ```
