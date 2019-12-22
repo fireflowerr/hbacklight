@@ -37,5 +37,5 @@ brightness                    200
 actual_brightness             200
 max_brightness               7500
 type                          raw
-» hbacklight -vi intel_backlight -d 1000
+» hbacklight -i intel_backlight -d 1000
 ```

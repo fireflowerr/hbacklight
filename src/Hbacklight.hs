@@ -9,7 +9,7 @@ import Text.Read (readMaybe)
 import Text.PrettyPrint.Boxes (Box(..), text, vcat, left, right, printBox, (<+>))
 import System.IO.Strict (readFile)
 import System.Posix.IO (openFd, fdWrite, OpenMode(..), defaultFileFlags)
-
+import Control.Monad.Trans.Except
 
 devicePath :: String
 devicePath = "/sys/class/backlight/"
@@ -53,12 +53,16 @@ data Opts = Opts
 data Mode = Plus Integer | Minus Integer | Percent Integer | Set Integer | NoOp deriving (Show)
 
 
-toMode :: String -> Mode
-toMode ('+':xs) = Plus    $ read xs
-toMode ('-':xs) = Minus   $ read xs
-toMode ('%':xs) = Percent $ read xs
-toMode ('~':xs) = Set     $ read xs
-toMode xs       = Set     $ read xs
+toMode :: String -> Either String Mode
+toMode s = case f s of
+    Nothing -> Left $ "could not parse delta: " <> s
+    Just m  -> Right m
+    where
+        f ('+':xs) = Plus    <$> readMaybe xs
+        f ('-':xs) = Minus   <$> readMaybe xs
+        f ('%':xs) = Percent <$> readMaybe xs
+        f ('~':xs) = Set     <$> readMaybe xs
+        f xs       = Set     <$> readMaybe xs
 
 
 opts :: Parser Opts
@@ -80,18 +84,22 @@ opts = Opts
         <> help "Modify the backlight value, ~ sets the value to AMOUNT, else shift is relative. Defaults to ~" )
 
 
-parseDevicePath :: String -> String -> String -> String -> String -> String -> Mode -> Maybe Interface
-parseDevicePath a1 a2 a3 a4 a5 a6 m = Backlight
-    <$> readMaybe a1
-    <*> readMaybe a2
-    <*> readMaybe a3
-    <*> readMaybe a4
-    <*> pure a5
-    <*> pure a6
-    <*> pure m
+parseDevicePath :: String -> String -> String -> String -> String -> String -> Mode -> Either String Interface
+parseDevicePath a1 a2 a3 a4 a5 a6 m = case r of
+  Nothing -> Left "err: cannot stat device properties"
+  Just x  -> Right x
+  where
+      r = Backlight
+        <$> readMaybe a1
+        <*> readMaybe a2
+        <*> readMaybe a3
+        <*> readMaybe a4
+        <*> pure a5
+        <*> pure a6
+        <*> pure m
 
 
-parseDevice :: Device -> Mode -> IO (Maybe Interface)
+parseDevice :: Device -> Mode -> IO (Either String Interface)
 parseDevice d m = do
     let parent   = devicePath <> d <> "/"
     let paths = (parent <>) . snd <$> deviceSub
@@ -103,7 +111,7 @@ parseDevice d m = do
         then do
             (a1:a2:a3:a4:a5:_) <- traverse (fmap (filter (/= '\n')) . readFile) paths
             return $ parseDevicePath a1 a2 a3 a4 a5 d m
-        else return Nothing
+        else return . Left $ "err: cannot locate device: " <> d
 
 
 dim :: Interface -> IO ()
@@ -147,11 +155,11 @@ table i = lv <+> rv where
 
 run :: Opts -> IO ()
 run o = do
-    let m = maybe NoOp toMode $ delta o
-    interface <- parseDevice (id' o) m
+    let m = maybe (Right NoOp)  toMode  $ delta o
+    interface <- runExceptT $ ExceptT . parseDevice (id' o) =<< except m
     case interface of
-        Nothing  -> putStrLn "err: cannot stat backlight device"
-        Just i   -> do
+        Left e -> putStrLn e
+        Right i -> do
             when (verbose o) $ printBox . table $ i
             dim i
 
