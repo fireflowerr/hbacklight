@@ -2,11 +2,12 @@ module Hbacklight where
 import Prelude hiding (max, readFile)
 import Control.Monad (when, foldM)
 import Control.Applicative (optional, (<|>))
-import Options.Applicative (Parser, execParser, info, helper, fullDesc, progDesc, header, metavar, long, short, strOption, help, switch)
+import Options.Applicative (Parser, customExecParser, prefs, showHelpOnEmpty, flag', info, helper, fullDesc, progDesc, header, metavar, long, short, strOption, help, switch)
 import Data.Semigroup ((<>))
 import System.Directory (doesFileExist, doesDirectoryExist, listDirectory)
 import Text.Read (readMaybe)
 import Text.PrettyPrint.Boxes (Box(..), text, vcat, left, right, printBox, (<+>), emptyBox)
+import System.IO (hPutStrLn, stderr)
 import System.IO.Strict (readFile)
 import System.Posix.IO (openFd, fdWrite, OpenMode(..), defaultFileFlags)
 import Control.Monad.Trans.Except
@@ -140,7 +141,8 @@ opts = Opts
 
 enumOpts :: Parser Opts
 enumOpts = Enumerate
-    <$> switch
+    <$> flag'
+        True
         (long "enum"
         <> short 'e'
         <> help "List available devices"
@@ -245,7 +247,7 @@ run o@Opts{} = do
         else Bl
     interface <- runExceptT $ ExceptT . parseFilePath t (id' o) =<< except m
     case interface of
-        Left e  -> putStrLn e
+        Left e  -> hPutStrLn stderr e
         Right i -> do
             when (verbose o) $ printBox . table $ i
             dim i
@@ -259,7 +261,7 @@ run Enumerate{} = do
 
 
 main :: IO ()
-main = run =<< execParser cmd where
+main = run =<< customExecParser (prefs showHelpOnEmpty) cmd where
     cmd = info ( helper <*> enumOpts <|> opts )
         ( fullDesc
         <> progDesc "Adjust backlight backlight"
