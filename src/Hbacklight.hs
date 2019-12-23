@@ -1,17 +1,18 @@
 module Hbacklight where
-import Prelude hiding (max, readFile)
-import Control.Monad (when, foldM)
 import Control.Applicative (optional, (<|>))
-import Options.Applicative (Parser, customExecParser, prefs, showHelpOnEmpty, flag', info, helper, fullDesc, progDesc, header, metavar, long, short, strOption, help, switch)
+import Control.Monad (when, foldM)
+import Control.Monad.Trans.Except (ExceptT(..), runExceptT, except)
+import Data.List.Split (splitOn)
 import Data.Semigroup ((<>))
+import Options.Applicative (Parser, customExecParser, prefs, showHelpOnEmpty, flag', info,
+       helper, fullDesc, progDesc, header, metavar, long, short, strOption, help, switch)
+import Prelude hiding (max, readFile)
 import System.Directory (doesFileExist, doesDirectoryExist, listDirectory)
-import Text.Read (readMaybe)
-import Text.PrettyPrint.Boxes (Box(..), text, vcat, left, right, printBox, (<+>), emptyBox)
 import System.IO (hPutStrLn, stderr)
 import System.IO.Strict (readFile)
 import System.Posix.IO (openFd, fdWrite, OpenMode(..), defaultFileFlags)
-import Control.Monad.Trans.Except
-import Data.List.Split (splitOn)
+import Text.PrettyPrint.Boxes (Box(..), text, vcat, left, right, printBox, (<+>), emptyBox)
+import Text.Read (readMaybe)
 
 backlightPath :: String
 backlightPath = "/sys/class/backlight/"
