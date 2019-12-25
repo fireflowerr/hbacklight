@@ -1,4 +1,4 @@
-module Hbacklight where
+module Hbacklight (main) where
 import Control.Applicative (optional, (<|>))
 import Control.Monad (when, foldM)
 import Control.Monad.Trans.Except (ExceptT(..), runExceptT, except)
@@ -44,16 +44,16 @@ lookupJust x xs = case x `lookup` xs of
 
 
 data Interface = Backlight
-    { power        :: Integer
-    , brightnessBl :: Integer
-    , actual       :: Integer
-    , maxBl        :: Integer
+    { power        :: Int
+    , brightnessBl :: Int
+    , actual       :: Int
+    , maxBl        :: Int
     , type'        :: String
     , nameBl       :: String
     , modeBl       :: Mode }
     | Led
-    { brightnessLd :: Integer
-    , maxLd        :: Integer
+    { brightnessLd :: Int
+    , maxLd        :: Int
     , nameLd       :: String
     , modeLd       :: Mode }
     deriving (Show)
@@ -68,7 +68,7 @@ data Opts = Opts
     { enum    :: Bool }
 
 
-data Mode = Plus Integer | Minus Integer | Percent Integer | Set Integer | NoOp deriving (Show)
+data Mode = Plus Int | Minus Int | Percent Int | Set Int | NoOp deriving (Show)
 
 
 data InMode = Bl | Ld deriving (Show)
@@ -79,17 +79,7 @@ deviceType Bl = "backlight"
 deviceType Ld = "led"
 
 
-deviceType' :: Interface -> String
-deviceType' Backlight{} = "backlight"
-deviceType' Led{} = "led"
-
-
-brightness :: Interface -> Integer
-brightness i@Backlight{} = brightnessBl i
-brightness i@Led{}       = brightnessLd i
-
-
-max :: Interface -> Integer
+max :: Interface -> Int
 max i@Backlight{} = maxBl i
 max i@Led{}       = maxLd i
 
@@ -196,10 +186,7 @@ dim i = case mode i of
     NoOp      -> return ()
     Plus x    -> setV $ lvl + x
     Minus x   -> setV $ lvl - x
-    Percent x -> let
-        p    = (fromIntegral x / 100)
-        m    = fromIntegral . max $ i
-        in setV . round $ p * m
+    Percent x -> setV $ x * (max i) `div` 100
     Set x     -> setV x
     where
         (dPath, dSub) = case i of
