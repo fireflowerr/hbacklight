@@ -1,113 +1,242 @@
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase #-}
+
 module Hbacklight (main) where
+
 import Control.Applicative (optional, (<|>))
-import Control.Monad (when, foldM)
-import Control.Monad.Trans.Except (ExceptT(..), runExceptT, except)
+import Control.Exception (Exception)
+import Control.Monad (when)
+import Control.Monad.Catch (throwM)
+
+import Data.Char (isDigit)
+import Data.Either (either)
 import Data.List.Split (splitOn)
-import Data.Semigroup ((<>))
-import Options.Applicative (Parser, customExecParser, prefs, showHelpOnEmpty, flag', info,
-       helper, fullDesc, progDesc, header, metavar, long, short, strOption, help, switch)
-import Prelude hiding (max, readFile)
-import System.Directory (doesFileExist, doesDirectoryExist, listDirectory)
-import System.IO (hPutStrLn, stderr)
-import System.IO.Strict (readFile)
-import System.Posix.IO (openFd, fdWrite, OpenMode(..), defaultFileFlags)
-import Text.PrettyPrint.Boxes (Box(..), text, vcat, left, right, printBox, (<+>), emptyBox)
+import Data.Maybe (fromJust)
+
+import Options.Applicative (Parser, customExecParser, prefs, showHelpOnEmpty
+    , flag', info, helper, fullDesc, progDesc, header, metavar, long, short
+    , strOption, help, switch)
+
+import System.Directory (listDirectory)
+import System.Posix.IO (openFd, fdWrite, OpenMode(WriteOnly), defaultFileFlags)
+
+import Text.PrettyPrint.Boxes (Box, text, vcat, left, right, printBox, (<+>)
+    , emptyBox)
 import Text.Read (readMaybe)
 
-backlightPath :: String
-backlightPath = "/sys/class/backlight/"
+import qualified Data.Text as T (Text, pack, unpack, uncons)
+import qualified System.IO.Strict as Strict (readFile)
 
+--------------------------------------------------------------------------------
+-- types & defaults
 
-backlightSub :: [(String, FilePath)]
-backlightSub =
-    [ ("power"      , "bl_power")
-    , ("brightness" , "brightness")
-    , ("actual"     , "actual_brightness")
-    , ("max"        , "max_brightness")
-    , ("type"       , "type") ]
-
-
-ledPath :: String
-ledPath = "/sys/class/leds/"
-
-
-ledSub :: [(String, FilePath)]
-ledSub =
-    [ ("brightness", "brightness")
-    , ("max", "max_brightness") ]
-
-
-lookupJust :: (Eq a) => a -> [(a, b)] -> b
-lookupJust x xs = case x `lookup` xs of
-    Nothing  -> error "key not present"
-    Just r   -> r
-
-
-data Interface = Backlight
+data Device = Backlight
     { power        :: Int
-    , brightnessBl :: Int
+    , brightness   :: Int
     , actual       :: Int
-    , maxBl        :: Int
-    , type'        :: String
-    , nameBl       :: String
-    , modeBl       :: Mode }
+    , maxB         :: Int
+    , typeB        :: T.Text
+    , name         :: T.Text }
     | Led
-    { brightnessLd :: Int
-    , maxLd        :: Int
-    , nameLd       :: String
-    , modeLd       :: Mode }
+    { brightness   :: Int
+    , maxB         :: Int
+    , name         :: T.Text }
     deriving (Show)
 
-
-data Opts = Opts
+data Config = Dim
     { led     :: Bool
-    , id'     :: String
+    , dId     :: T.Text
     , verbose :: Bool
-    , delta   :: Maybe String }
-    | Enumerate
-    { enum    :: Bool }
+    , delta   :: Maybe T.Text }
+    | Enumerate Bool
 
+data OpT = Plus | Minus | Percent | Set deriving (Show)
+data Operation = Op OpT Int deriving (Show)
 
-data Mode = Plus Int | Minus Int | Percent Int | Set Int | NoOp deriving (Show)
+type TFilePath = T.Text
 
+type DeviceProps = [(T.Text, TFilePath)]
 
-data InMode = Bl | Ld deriving (Show)
+type DeviceMap = (TFilePath, DeviceProps)
 
+data Env = Env
+    { blMap  :: DeviceMap
+    , ledMap :: DeviceMap }
 
-deviceType :: InMode -> String
-deviceType Bl = "backlight"
-deviceType Ld = "led"
-
-
-max :: Interface -> Int
-max i@Backlight{} = maxBl i
-max i@Led{}       = maxLd i
-
-
-name :: Interface -> String
-name i@Backlight{} = nameBl i
-name i@Led{}       = nameLd i
-
-
-mode :: Interface -> Mode
-mode i@Backlight{} = modeBl i
-mode i@Led{}       = modeLd i
-
-
-toMode :: String -> Either String Mode
-toMode s = case f s of
-    Nothing -> Left $ "could not parse delta: " <> s
-    Just m  -> Right m
+defaultEnv :: Env
+defaultEnv = Env
+    { blMap  = (blPath, blProps)
+    , ledMap = (ldPath, ldProps) }
     where
-        f ('+':xs) = Plus    <$> readMaybe xs
-        f ('-':xs) = Minus   <$> readMaybe xs
-        f ('%':xs) = Percent <$> readMaybe xs
-        f ('~':xs) = Set     <$> readMaybe xs
-        f xs       = Set     <$> readMaybe xs
+        blPath = "/sys/class/backlight/"
+        ldPath = "/sys/class/leds/"
+        blProps =
+            [ ("power"      , "bl_power")
+            , ("brightness" , "brightness")
+            , ("actual"     , "actual_brightness")
+            , ("max"        , "max_brightness")
+            , ("type"       , "type") ]
+        ldProps =
+            [ ("brightness", "brightness")
+            , ("max", "max_brightness") ]
 
+data Ex = ParseFailure String
 
-opts :: Parser Opts
-opts = Opts
+instance Exception Ex
+
+instance Show Ex where
+    show (ParseFailure s) = "*** Exception: parseFailure: " <> s
+
+--------------------------------------------------------------------------------
+-- main logic
+
+readEither :: Read a => b -> String -> Either b a
+readEither err s = case readMaybe s of
+    Just x -> Right x
+    _      -> Left err
+
+readErr :: Read a => String -> Either Ex a
+readErr s = readEither (ParseFailure s) s
+
+liftEIO :: Exception e => Either e a -> IO a -- may throw IOError
+liftEIO = either throwM return
+
+-- DeviceProps and Device are known to have same argument structure
+table :: DeviceProps -> DeviceProps -> Device -> Box
+table bl ld = \case
+    d@Backlight{} -> lv "backlight" (fmap T.unpack <$> bl)
+        <+> rv
+        [ T.unpack $ name d
+        , show $ power d
+        , show $ brightness d
+        , show $ actual d
+        , show $ maxB d
+        , T.unpack $ typeB d
+        ]
+    d@Led{} -> lv "led" (fmap T.unpack <$> ld)
+        <+> rv
+        [ T.unpack $ name d
+        , show $ brightness d
+        , show $ maxB d ]
+    where
+        lv itype = vcat left . (text itype :) . fmap (text . snd)
+        rv = vcat right . fmap text
+
+readOpT :: Char -> Either Ex OpT
+readOpT = \case
+    '+' -> Right Plus
+    '-' -> Right Minus
+    '%' -> Right Percent
+    '~' -> Right Set
+    x   -> Left . ParseFailure $ "unsupported mode \"" <> (x:"\"")
+
+readOp :: T.Text -> Either Ex Operation
+readOp s = do
+    (x, xs) <- uncons' s
+    opType  <- readOpT x
+    op      <- readErr $ T.unpack xs
+    return $ Op opType op
+    where
+        uncons' x = case T.uncons x of
+            Nothing -> Left . ParseFailure $ "cannot parse empty input"
+            Just u@(h,_)  -> Right $ if isDigit h then ('~', x) else u --deflt ~
+
+-- read DeviceMap attributes from filesystem
+readDProps :: T.Text -> DeviceMap -> IO [String]
+readDProps dname (dloc, dmap) = mapM
+    (Strict.readFile . toPath . ('/' :) . T.unpack . snd)
+    dmap
+    where
+        dpath = T.unpack dloc <> T.unpack dname
+        toPath = (dpath <>)
+
+parseBl :: T.Text -> DeviceMap -> IO Device -- may throw Ex or IOError
+parseBl dname dmap = do
+    -- read each property from DeviceMap and apply to Device cons
+    (a1:a2:a3:a4:a5:_) <- readDProps dname dmap
+    liftEIO $ Backlight
+        <$> readErr a1
+        <*> readErr a2
+        <*> readErr a3
+        <*> readErr a4
+        <*> Right (T.pack a5)
+        <*> Right dname
+
+parseLed :: T.Text -> DeviceMap -> IO Device -- may throw Ex or IOError
+parseLed dname dmap = do
+    (a1:a2:_) <- readDProps dname dmap
+    liftEIO $ Led
+        <$> readErr a1
+        <*> readErr a2
+        <*> Right dname
+
+-- dims and returns updated device
+dim :: DeviceMap -> Device -> Operation -> IO Device
+dim (dpath, dsub) i = \case
+    Op Plus x    -> setV $ lvl + x
+    Op Minus x   -> setV $ lvl - x
+    Op Percent x -> setV $ x * maxB i `div` 100
+    Op Set x     -> setV x
+    where
+        path = T.unpack $ dpath <> name i <> "/"
+            <> (fromJust $ lookup "brightness" dsub)
+        lvl = brightness i
+        fd = openFd
+            path
+            WriteOnly
+            Nothing
+            defaultFileFlags
+        nonNeg n = if n > 0 then n else 0
+        writeV v = fd >>= \handle -> handle `fdWrite` show v
+            >> return (i { brightness = v } )
+        setV = writeV . nonNeg
+
+ -- list all available led and backlight devices
+enumDevices :: TFilePath -> TFilePath -> IO Box
+enumDevices blPath ledPath = do
+   let blHeader  = text "backlight"
+   let ledHeader = text "led"
+   blDir  <- listDirectory $ T.unpack blPath
+   ledDir <- listDirectory $ T.unpack ledPath
+   let blBody = mkBody  blDir
+   let ledBody = mkBody ledDir
+   return $ vcat left
+        [ blHeader
+        , blBody
+        , ledHeader
+        , ledBody ]
+    where
+        fname = text . last . splitOn "/"
+        mkBody = (<+>) (emptyBox 1 3) . vcat left . fmap fname
+
+run :: Env -> Config -> IO ()
+run Env{blMap=bM, ledMap=lM} = \case
+    c@Dim{} -> do
+        tmp <- if led c
+            then (lM, ) <$> parseLed (dId c) lM
+            else (bM, ) <$> parseBl  (dId c) bM
+        device <- uncurry (dimUpdate c) $ tmp -- update device if dimmed
+        when (verbose c) $ printBox $ table (snd bM) (snd lM) device
+    Enumerate{} -> printBox =<< enumDevices (fst bM) (fst lM)
+    where
+        dimUpdate :: Config -> DeviceMap -> Device -> IO Device
+        dimUpdate Dim{delta=del} dmap device  = case liftEIO . readOp <$> del of
+            Just op -> dim dmap device =<< op
+            Nothing -> return device
+
+main :: IO ()
+main = run defaultEnv =<< customExecParser (prefs showHelpOnEmpty) cmd where
+    cmd = info ( helper <*> enumParser <|> dimParser )
+        ( fullDesc
+        <> progDesc "Adjust backlight backlight"
+        <> header "hbacklight - backlight manager" )
+
+--------------------------------------------------------------------------------
+-- app parser
+
+dimParser :: Parser Config
+dimParser = Dim
     <$> switch
         (long "led"
         <> short 'l'
@@ -127,130 +256,14 @@ opts = Opts
         ( long "delta"
         <> short 'd'
         <> metavar "[+,-,%,~]AMOUNT"
-        <> help "Modify the backlight value, ~ sets the value to AMOUNT, else shift is relative. Defaults to ~" )
+        <> help ( "Modify the backlight value, ~ sets the value to AMOUNT, else"
+            <> "shift is relative. Defaults to ~" ) )
 
-
-enumOpts :: Parser Opts
-enumOpts = Enumerate
+enumParser :: Parser Config
+enumParser = Enumerate
     <$> flag'
         True
         (long "enum"
         <> short 'e'
         <> help "List available devices"
         )
-
-
-parseBacklightPaths :: InMode -> [String] -> String -> Mode -> Either String Interface
-parseBacklightPaths u xs n m = case f of
-      Nothing -> Left $ "err: cannot stat " <> deviceType u <> " properties"
-      Just x  -> Right x
-      where
-      f = case (u, xs) of
-        (Bl, (a1:a2:a3:a4:a5:_)) -> Backlight
-            <$> readMaybe a1
-            <*> readMaybe a2
-            <*> readMaybe a3
-            <*> readMaybe a4
-            <*> pure a5
-            <*> pure n
-            <*> pure m
-        (Ld, (a1:a2:_)) -> Led
-            <$> readMaybe a1
-            <*> readMaybe a2
-            <*> pure n
-            <*> pure m
-        _ -> Nothing
-
-
-parseFilePath :: InMode -> String -> Mode -> IO (Either String Interface)
-parseFilePath u d m = do
-    let
-     (devicePath, deviceSub) = case u of
-        Bl -> (backlightPath, backlightSub)
-        Ld -> (ledPath, ledSub)
-    let parent = devicePath <> d <> "/"
-    let paths = (parent <>) . snd <$> deviceSub
-    valid <- (&&) <$> doesDirectoryExist parent <*> foldM
-        (\acc x -> (&&) <$> doesFileExist x <*> pure acc)
-        True
-        paths
-    if valid
-        then do
-            xs <- traverse (fmap (filter (/= '\n')) . readFile) paths
-            return $ parseBacklightPaths u xs d m
-        else return . Left $ "err: cannot locate " <> deviceType u <> ": " <> d
-
-
-dim :: Interface -> IO ()
-dim i = case mode i of
-    NoOp      -> return ()
-    Plus x    -> setV $ lvl + x
-    Minus x   -> setV $ lvl - x
-    Percent x -> setV $ x * (max i) `div` 100
-    Set x     -> setV x
-    where
-        (dPath, dSub) = case i of
-            Backlight{} -> (backlightPath, backlightSub)
-            Led{}       -> (ledPath, ledSub)
-        path = dPath <> name i <> "/" <> lookupJust "brightness" dSub
-        fd   = openFd
-            path
-            WriteOnly
-            Nothing
-            defaultFileFlags
-        lvl     = brightnessBl i
-        setV v  = fd >>= \handle -> handle `fdWrite` show v >> return ()
-
-
-idL :: Int
-idL = 24
-
-
-table :: Interface -> Box
-table i = case i of
-    Backlight{} -> lv "backlight" backlightSub
-        <+> rv
-        [ take idL $ nameBl i
-        , show . power $ i
-        , show . brightnessBl $ i
-        , show . actual $ i
-        , show . maxBl $ i
-        , type' i
-        ]
-    Led{} -> lv "led" ledSub
-        <+> rv
-        [ take idL $ nameLd i
-        , show . brightnessLd $ i
-        , show . maxLd $ i ]
-    where
-        lv itype = vcat left . (text itype :) . fmap (text . snd)
-        rv = vcat right . fmap text
-
-
-run :: Opts -> IO ()
-run o@Opts{} = do
-    let m = maybe (Right NoOp)  toMode  $ delta o
-    let t = if led o
-        then Ld
-        else Bl
-    interface <- runExceptT $ ExceptT . parseFilePath t (id' o) =<< except m
-    case interface of
-        Left e  -> hPutStrLn stderr e
-        Right i -> do
-            when (verbose o) $ printBox . table $ i
-            dim i
-run Enumerate{} = do
-    let mkBody  = fmap ( (<+>) (emptyBox 1 3) . vcat left . fmap (text . last . splitOn "/") ) . listDirectory
-    let blHeadr = text "backlight"
-    let ldHeadr = text "led"
-    blBody <- mkBody backlightPath
-    ldBody <- mkBody ledPath
-    printBox $ vcat left [blHeadr, blBody, ldHeadr, ldBody]
-
-
-main :: IO ()
-main = run =<< customExecParser (prefs showHelpOnEmpty) cmd where
-    cmd = info ( helper <*> enumOpts <|> opts )
-        ( fullDesc
-        <> progDesc "Adjust backlight backlight"
-        <> header "hbacklight - backlight manager" )
