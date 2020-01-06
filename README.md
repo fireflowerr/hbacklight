@@ -1,4 +1,4 @@
-# hbacklight
+# hbacklight [![Build Status](https://api.travis-ci.org/paroxayte/hbacklight.svg?branch=master)](https://travis-ci.org/paroxayte/hbacklight)
 Backlight controller for Linux systems
 
 ## Installation
