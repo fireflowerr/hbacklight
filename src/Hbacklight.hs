@@ -19,7 +19,7 @@ import Options.Applicative (Parser, customExecParser, prefs, showHelpOnEmpty
     , strOption, help, switch)
 
 import System.Directory (listDirectory)
-import System.Posix.IO (openFd, fdWrite, OpenMode(WriteOnly), defaultFileFlags)
+import System.Posix.IO (openFd, closeFd, fdWrite, OpenMode(WriteOnly), defaultFileFlags)
 
 import Text.PrettyPrint.Boxes (Box, text, vcat, left, right, printBox, (<+>)
     , emptyBox)
@@ -173,24 +173,29 @@ parseLed dname dmap = do
 
 -- dims and returns updated device
 dim :: DeviceMap -> Device -> Operation -> IO Device
-dim (dpath, dsub) i = \case
-    Op Plus x    -> setV $ lvl + x
-    Op Minus x   -> setV $ lvl - x
-    Op Percent x -> setV $ x * maxB i `div` 100
-    Op Set x     -> setV x
-    where
-        path = T.unpack $ dpath <> name i <> "/"
-            <> (fromJust $ lookup "brightness" dsub)
-        lvl = brightness i
-        fd = openFd
-            path
-            WriteOnly
-            Nothing
-            defaultFileFlags
-        nonNeg n = if n > 0 then n else 0
-        writeV v = fd >>= \handle -> handle `fdWrite` show v
-            >> return (i { brightness = v } )
-        setV = writeV . nonNeg
+dim (dpath, dsub) i op = do
+        device <- runOp op
+        () <- closeFd =<< fd
+        return device
+        where
+            path = T.unpack $ dpath <> name i <> "/"
+                <> (fromJust $ lookup "brightness" dsub)
+            lvl = brightness i
+            fd = openFd
+                path
+                WriteOnly
+                Nothing
+                defaultFileFlags
+            nonNeg n = if n > 0 then n else 0
+            writeV v = fd >>= \handle -> handle `fdWrite` show v
+                >> return (i { brightness = v } )
+            setV = writeV . nonNeg
+            runOp = \case
+                Op Plus x    -> setV $ lvl + x
+                Op Minus x   -> setV $ lvl - x
+                Op Percent x -> setV $ x * maxB i `div` 100
+                Op Set x     -> setV x
+
 
  -- list all available led and backlight devices
 enumDevices :: TFilePath -> TFilePath -> IO Box
@@ -216,12 +221,12 @@ run Env{blMap=bM, ledMap=lM} = \case
         tmp <- if led c
             then (lM, ) <$> parseLed (dId c) lM
             else (bM, ) <$> parseBl  (dId c) bM
-        device <- uncurry (dimUpdate c) $ tmp -- update device if dimmed
+        device <- uncurry (dimUpdate c) tmp -- update device if dimmed
         when (verbose c) $ printBox $ table (snd bM) (snd lM) device
     Enumerate{} -> printBox =<< enumDevices (fst bM) (fst lM)
     where
         dimUpdate :: Config -> DeviceMap -> Device -> IO Device
-        dimUpdate Dim{delta=del} dmap device  = case liftEIO . readOp <$> del of
+        dimUpdate Dim{delta=del} dmap device = case liftEIO . readOp <$> del of
             Just op -> dim dmap device =<< op
             Nothing -> return device
 
