@@ -6,7 +6,7 @@ module Hbacklight (main) where
 
 import Control.Applicative (optional, (<|>))
 import Control.Exception (Exception)
-import Control.Monad (when)
+import Control.Monad (when, join)
 import Control.Monad.Catch (throwM)
 
 import Data.Char (isDigit)
@@ -16,7 +16,7 @@ import Data.Maybe (fromJust)
 
 import Options.Applicative (Parser, customExecParser, prefs, showHelpOnEmpty
     , flag', info, helper, fullDesc, progDesc, header, metavar, long, short
-    , strOption, help, switch)
+    , strOption, help, switch, auto, option, value, showDefault)
 
 import System.Directory (listDirectory)
 import System.Posix.IO (openFd, closeFd, fdWrite, OpenMode(WriteOnly), defaultFileFlags)
@@ -48,7 +48,8 @@ data Config = Dim
     { led     :: Bool
     , dId     :: T.Text
     , verbose :: Bool
-    , delta   :: Maybe T.Text }
+    , delta   :: Maybe T.Text
+    , floor'  :: Int }
     | Enumerate Bool
 
 data OpT = Plus | Minus | Percent | Set deriving (Show)
@@ -172,8 +173,8 @@ parseLed dname dmap = do
         <*> Right dname
 
 -- dims and returns updated device
-dim :: DeviceMap -> Device -> Operation -> IO Device
-dim (dpath, dsub) i op = do
+dim :: DeviceMap -> Device -> Operation -> Int -> IO Device
+dim (dpath, dsub) i op minV = do
         device <- runOp op
         () <- closeFd =<< fd
         return device
@@ -186,10 +187,10 @@ dim (dpath, dsub) i op = do
                 WriteOnly
                 Nothing
                 defaultFileFlags
-            nonNeg n = if n > 0 then n else 0
+            toMin n = if n > minV then n else minV
             writeV v = fd >>= \handle -> handle `fdWrite` show v
                 >> return (i { brightness = v } )
-            setV = writeV . nonNeg
+            setV = writeV . toMin
             runOp = \case
                 Op Plus x    -> setV $ lvl + x
                 Op Minus x   -> setV $ lvl - x
@@ -225,8 +226,8 @@ run Env{blMap=bM, ledMap=lM} = \case
     Enumerate{} -> printBox =<< enumDevices (fst bM) (fst lM)
     where
         dimUpdate :: Config -> DeviceMap -> Device -> IO Device
-        dimUpdate Dim{delta=del} dmap device = case liftEIO . readOp <$> del of
-            Just op -> dim dmap device =<< op
+        dimUpdate Dim{delta=del, floor'=minV} dmap device = case liftEIO . readOp <$> del of
+            Just op -> join $ dim dmap device <$> op <*> pure minV
             Nothing -> return device
 
 main :: IO ()
@@ -261,7 +262,16 @@ dimParser = Dim
         <> short 'd'
         <> metavar "[+,-,%,~]AMOUNT"
         <> help ( "Modify the backlight value, ~ sets the value to AMOUNT, else"
-            <> "shift is relative. Defaults to ~" ) )
+            <> "shift is relative. Defaults to ~" )
+        )
+    <*> (option auto)
+        ( long "floor"
+        <> short 'f'
+        <> metavar "FLOOR"
+        <> value 1
+        <> showDefault
+        <> help "Set the minimum value which the brightness may be assigned."
+        )
 
 enumParser :: Parser Config
 enumParser = Enumerate

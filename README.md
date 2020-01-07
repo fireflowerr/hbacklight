@@ -26,8 +26,8 @@ ACTION=="add", SUBSYSTEM=="leds", KERNEL=="dell::kbd_backlight", RUN+="/bin/chmo
 ```
 ## Usage
 ```
-Usage: hbacklight [[-e|--enum] | [-l|--led] (-i|--id TARGET) [-v|--verbose]
-                    [-d|--delta [+,-,%,~]AMOUNT]]
+Usage: hbacklight ((-e|--enum) | [-l|--led] (-i|--id TARGET) [-v|--verbose]
+                    [-d|--delta [+,-,%,~]AMOUNT] [-f|--floor FLOOR])
   Adjust device brightness
 
 Available options:
@@ -38,7 +38,9 @@ Available options:
   -v,--verbose             Informative summary backlight backlight state
   -d,--delta [+,-,%,~]AMOUNT
                            Modify the backlight value, ~ sets the value to
-                           AMOUNT, else shift is relative. Defaults to ~
+                           AMOUNT, elseshift is relative. Defaults to ~
+  -f,--floor FLOOR         Set the minimum value which the brightness may be
+                           assigned. (default: 1)
 ```
 
 ## Examples
@@ -57,4 +59,7 @@ brightness                       2
 max_brightness                   2
 
 » hbacklight -i intel_backlight -d 1000
+
+# turns the screen off
+» hbacklight -i intel_backlight -d 0 -f 0
 ```
