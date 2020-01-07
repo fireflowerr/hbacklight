@@ -196,7 +196,6 @@ dim (dpath, dsub) i op = do
                 Op Percent x -> setV $ x * maxB i `div` 100
                 Op Set x     -> setV x
 
-
  -- list all available led and backlight devices
 enumDevices :: TFilePath -> TFilePath -> IO Box
 enumDevices blPath ledPath = do

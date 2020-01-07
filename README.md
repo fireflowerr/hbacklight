@@ -8,6 +8,13 @@ cd hbacklight
 cabal install
 ```
 
+Alternatively, an aur package is available and can be installed with an aur-helper. Ex: (with yay)
+
+**note:** ghc-8.6.5 is an unlisted build dependency of the aur package. See PKGBUILD for more information.
+```
+yay -S hbacklight-git
+```
+
 In order to use hbacklight without sudo, you may need to create a udev rule and ensure you are part of the group granted permissions. EG:
 ```
 » cat /etc/udev/rules.d/10-backlight.rules
