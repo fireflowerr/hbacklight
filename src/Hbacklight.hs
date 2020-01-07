@@ -233,7 +233,7 @@ main :: IO ()
 main = run defaultEnv =<< customExecParser (prefs showHelpOnEmpty) cmd where
     cmd = info ( helper <*> enumParser <|> dimParser )
         ( fullDesc
-        <> progDesc "Adjust backlight backlight"
+        <> progDesc "Adjust device brightness"
         <> header "hbacklight - backlight manager" )
 
 --------------------------------------------------------------------------------

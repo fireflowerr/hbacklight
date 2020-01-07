@@ -28,7 +28,7 @@ ACTION=="add", SUBSYSTEM=="leds", KERNEL=="dell::kbd_backlight", RUN+="/bin/chmo
 ```
 Usage: hbacklight [[-e|--enum] | [-l|--led] (-i|--id TARGET) [-v|--verbose]
                     [-d|--delta [+,-,%,~]AMOUNT]]
-  Adjust backlight backlight
+  Adjust device brightness
 
 Available options:
   -h,--help                Show this help text
