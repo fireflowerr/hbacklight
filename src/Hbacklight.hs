@@ -1,6 +1,7 @@
-{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE DeriveGeneric     #-}
+{-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE TupleSections     #-}
 
 module Hbacklight (main) where
 
@@ -14,15 +15,19 @@ import Data.Either (either)
 import Data.List.Split (splitOn)
 import Data.Maybe (fromJust)
 
+import GHC.Generics
+
 import Options.Applicative (Parser, customExecParser, prefs, showHelpOnEmpty
     , flag', info, helper, fullDesc, progDesc, header, metavar, long, short
     , strOption, help, switch, auto, option, value, showDefault)
 
 import System.Directory (listDirectory)
-import System.Posix.IO (openFd, closeFd, fdWrite, OpenMode(WriteOnly), defaultFileFlags)
+import System.Posix.IO (openFd, closeFd, fdWrite, OpenMode(WriteOnly)
+    , defaultFileFlags)
 
 import Text.PrettyPrint.Boxes (Box, text, vcat, left, right, printBox, (<+>)
-    , emptyBox)
+    , emptyBox, hsep, top)
+import Text.PrettyPrint.Records
 import Text.Read (readMaybe)
 
 import qualified Data.Text as T (Text, pack, unpack, uncons)
@@ -42,7 +47,10 @@ data Device = Backlight
     { brightness   :: Int
     , maxB         :: Int
     , name         :: T.Text }
-    deriving (Show)
+    deriving (Generic, Show)
+
+instance FQuery Device
+instance VQuery Device
 
 data Config = Dim
     { led     :: Bool
@@ -103,26 +111,12 @@ readErr s = readEither (ParseFailure s) s
 liftEIO :: Exception e => Either e a -> IO a -- may throw IOError
 liftEIO = either throwM return
 
--- DeviceProps and Device are known to have same argument structure
-table :: DeviceProps -> DeviceProps -> Device -> Box
-table bl ld = \case
-    d@Backlight{} -> lv "backlight" (fmap T.unpack <$> bl)
-        <+> rv
-        [ T.unpack $ name d
-        , show $ power d
-        , show $ brightness d
-        , show $ actual d
-        , show $ maxB d
-        , T.unpack $ typeB d
-        ]
-    d@Led{} -> lv "led" (fmap T.unpack <$> ld)
-        <+> rv
-        [ T.unpack $ name d
-        , show $ brightness d
-        , show $ maxB d ]
-    where
-        lv itype = vcat left . (text itype :) . fmap (text . snd)
-        rv = vcat right . fmap text
+-- Print device as table
+table :: Device -> Box
+table d = hsep 2 top [lhs, rhs] where
+    lhs = vcat left  $ text <$> fields d
+    rhs = vcat right $ text <$> values d
+
 
 readOpT :: Char -> Either Ex OpT
 readOpT = \case
@@ -161,8 +155,12 @@ parseBl dname dmap = do
         <*> readErr a2
         <*> readErr a3
         <*> readErr a4
-        <*> Right (T.pack a5)
+        <*> Right (T.pack . removeLF $ a5)
         <*> Right dname
+    where
+        removeLF xs = case last xs of
+            '\n' -> init xs
+            _    -> xs
 
 parseLed :: T.Text -> DeviceMap -> IO Device -- may throw Ex or IOError
 parseLed dname dmap = do
@@ -222,12 +220,12 @@ run Env{blMap=bM, ledMap=lM} = \case
             then (lM, ) <$> parseLed (dId c) lM
             else (bM, ) <$> parseBl  (dId c) bM
         device <- uncurry (dimUpdate c) tmp -- update device if dimmed
-        when (verbose c) $ printBox $ table (snd bM) (snd lM) device
+        when (verbose c) $ printBox $ table device
     Enumerate{} -> printBox =<< enumDevices (fst bM) (fst lM)
     where
         dimUpdate :: Config -> DeviceMap -> Device -> IO Device
-        dimUpdate Dim{delta=del, floor'=minV} dmap device = case liftEIO . readOp <$> del of
-            Just op -> join $ dim dmap device <$> op <*> pure minV
+        dimUpdate c dmap device = case liftEIO . readOp <$> delta c of
+            Just op -> join $ dim dmap device <$> op <*> pure (floor' c)
             Nothing -> return device
 
 main :: IO ()
