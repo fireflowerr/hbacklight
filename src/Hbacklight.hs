@@ -190,10 +190,10 @@ dim (dpath, dsub) i op minV = do
                 >> return (i { brightness = v } )
             setV = writeV . toMin
             runOp = \case
-                Op Plus x    -> setV $ lvl + x
+                Op Plus x    -> setV $ min (lvl + x) (maxB i)
                 Op Minus x   -> setV $ lvl - x
                 Op Percent x -> setV $ x * maxB i `div` 100
-                Op Set x     -> setV x
+                Op Set x     -> setV $ min x (maxB i)
 
  -- list all available led and backlight devices
 enumDevices :: TFilePath -> TFilePath -> IO Box
